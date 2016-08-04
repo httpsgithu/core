@@ -23,8 +23,7 @@ namespace OCA\DAV\Files;
 use Sabre\HTTP\RequestInterface;
 use Sabre\DAV\Exception\BadRequest;
 
-class Bundle
-{
+class Bundle {
     /**
      * @var \Sabre\HTTP\RequestInterface
      */
@@ -45,8 +44,7 @@ class Bundle
      *
      * @param Request $request
      */
-    public function __construct(RequestInterface $request)
-    {
+    public function __construct(RequestInterface $request) {
         $this->request = $request;
         $this->cursor = 0;
     }
@@ -58,8 +56,7 @@ class Bundle
      *
      * @return string|boolean
      */
-    public function gets()
-    {
+    public function gets() {
         $content = $this->getContent();
         if (is_resource($content)) {
             $line = fgets($content);
@@ -86,8 +83,7 @@ class Bundle
     /**
      * @return int
      */
-    public function getCursor()
-    {
+    public function getCursor() {
         return $this->cursor;
     }
 
@@ -96,8 +92,7 @@ class Bundle
      *
      * @return bool
      */
-    public function eof()
-    {
+    public function eof() {
         return $this->cursor == -1 || (is_resource($this->getContent()) && feof($this->getContent()));
     }
 
@@ -107,8 +102,7 @@ class Bundle
      * @return resource|string
      * @throws \RuntimeException
      */
-    public function getContent()
-    {
+    public function getContent() {
         if ($this->content === null) {
             $this->content = $this->request->getBody();
 

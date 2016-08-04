@@ -23,8 +23,6 @@ namespace OCA\DAV\Files;
 use Sabre\DAV\ServerPlugin;
 use Sabre\HTTP\RequestInterface;
 use Sabre\HTTP\ResponseInterface;
-use Sabre\DAV\Exception\NotFound;
-use Sabre\DAV\Exception\Conflict;
 use Sabre\DAV\Exception\Forbidden;
 use Sabre\DAV\Exception\BadRequest;
 
@@ -69,11 +67,6 @@ class BundlingPlugin extends ServerPlugin {
 	private $contentHandler = null;
 
 	/**
-	 * @var Array
-	 */
-	private $bundleMetadata = null;
-
-	/**
 	 * @var Bool
 	 */
 	private $endDelimiterReached = false;
@@ -114,13 +107,15 @@ class BundlingPlugin extends ServerPlugin {
 		$this->request = $request;
 		$this->response = $response;
 
+		//validate the request before parsing
 		$this->validateRequest();
 
-		$this->getBundleMetadata();
+		//Create objects ($bundleMetadata,$bundleData) from metadata and binary contents
+		$bundleMetadata = $this->getBundleMetadata();
+		$bundleContents = $this->getBundleContents();
 
-		$this->getBundleContents();
-
-		return $this->sendResponse();
+		//Process bundle and send a multistatus response
+		return $this->processBundle($bundleMetadata,$bundleContents);
 	}
 
 	/**
@@ -131,27 +126,28 @@ class BundlingPlugin extends ServerPlugin {
 	 * @throws TODO: handle exception
 	 * @return array
 	 */
-	protected function getPart(RequestInterface $request, $boundary)
-	{
+	protected function getPart(RequestInterface $request, $boundary) {
 		if ($this->contentHandler === null) {
-			$this->contentHandler = new Bundle($request);
+			$contentHandler = new Bundle($request);
+		} else{
+			$contentHandler = $this->contentHandler;
 		}
 
 		$delimiter = '--'.$boundary."\r\n";
 		$endDelimiter = '--'.$boundary.'--';
 		$boundaryCount = 0;
 		$content = '';
-		while (!$this->contentHandler->eof()) {
-			$line = $this->contentHandler->gets();
+		while (!$contentHandler->eof()) {
+			$line = $contentHandler->gets();
 			if ($line === false) {
-				//TODO: handle exception PROPERLY
+				//TODO: handle exception
 				throw new BadRequest('An error appears while reading input in content part');
 			}
 
 			if ($boundaryCount == 0) {
 				if ($line != $delimiter) {
-					if ($this->contentHandler->getCursor() == strlen($line)) {
-						//TODO: handle exception PROPERLY
+					if ($contentHandler->getCursor() == strlen($line)) {
+						//TODO: handle exception
 						throw new BadRequest('Expected boundary delimiter in content part');
 					}
 				} else {
@@ -171,13 +167,13 @@ class BundlingPlugin extends ServerPlugin {
 		$content = trim($content);
 
 		if (empty($content)) {
-			//TODO: handle exception PROPERLY
+			//TODO: handle exception
 			throw new BadRequest('Received an empty content part');
 		}
 
 		$headerLimitation = strpos($content, "\r\n\r\n") + 1;
 		if ($headerLimitation == -1) {
-			//TODO: handle exception PROPERLY
+			//TODO: handle exception
 			throw new BadRequest('Unable to determine headers limit for content part');
 		}
 
@@ -200,11 +196,11 @@ class BundlingPlugin extends ServerPlugin {
 	/**
 	 * Check multipart headers.
 	 *
-	 * @throws TODO: handle exception PROPERLY
+	 * @throws /Sabre\DAV\Exception\BadRequest
+	 * @throws /Sabre\DAV\Exception\Forbidden
 	 * @return void
 	 */
 	private function validateRequest() {
-
 		// Making sure the end node exists
 		//TODO: add support for user creation if that is first sync. Currently user has to be created.
 		$path = $this->request->getPath();
@@ -215,17 +211,18 @@ class BundlingPlugin extends ServerPlugin {
 		foreach ($headers as $header) {
 			$value = $this->request->getHeader($header);
 			if ($value === null) {
-				//TODO:HANDLE EXCEPTION PROPERLY
+				//TODO:HANDLE EXCEPTION
 				throw new BadRequest(sprintf('%s header is needed', $header));
 			} elseif (!is_int($value) && empty($value)) {
-				//TODO:HANDLE EXCEPTION PROPERLY
+				//TODO:HANDLE EXCEPTION
 				throw new BadRequest(sprintf('%s header must not be empty', $header));
 			}
 		}
 
+		//TODO: is it working like that??
 		if (!$this->server->emit('beforeWriteBundle', [$path])){
 			//TODO:handle exception
-			throw new Forbidden('beforeWriteContent preconditions failed');
+			throw new Forbidden('beforeWriteBundle preconditions failed');
 		}
 
 		$contentParts = explode(';', $this->request->getHeader('Content-Type'));
@@ -239,7 +236,7 @@ class BundlingPlugin extends ServerPlugin {
 		$contentType = trim($contentParts[0]);
 		$expectedContentType = 'multipart/related';
 		if ($contentType != $expectedContentType) {
-			//TODO: handle exception PROPERLY
+			//TODO: handle exception
 			throw new BadRequest(sprintf(
 				'Content-Type must be %s',
 				$expectedContentType
@@ -250,7 +247,7 @@ class BundlingPlugin extends ServerPlugin {
 		$boundaryPart = trim($contentParts[1]);
 		$shouldStart = 'boundary=';
 		if (substr($boundaryPart, 0, strlen($shouldStart)) != $shouldStart) {
-			//TODO:handle boundrary exception
+			//TODO:handle exception
 			throw new BadRequest('Boundary is not set');
 		}
 
@@ -266,11 +263,10 @@ class BundlingPlugin extends ServerPlugin {
 	 *
 	 * Note: MUST be called before getBundleContent, and just one time.
 	 *
-	 * @throws TODO:handle boundrary exception
+	 * @throws /Sabre\DAV\Exception\BadRequest
 	 * @return void
 	 */
-	private function getBundleMetadata()
-	{
+	private function getBundleMetadata() {
 		list($boundaryContentHeader, $boundaryContent) = $this->getPart($this->request, $this->boundary);
 
 		if ($boundaryContentHeader === null && $boundaryContent === null){
@@ -293,7 +289,8 @@ class BundlingPlugin extends ServerPlugin {
 			//TODO: handle exception PROPERLY
 			throw new BadRequest('Unable to parse JSON');
 		}
-		$this->bundleMetadata = $jsonContent;
+
+		return $jsonContent;
 	}
 
 	/**
@@ -301,94 +298,54 @@ class BundlingPlugin extends ServerPlugin {
 	 *
 	 * Note: MUST be called after getFormData, and just one time.
 	 *
+	 * @throws /Sabre\DAV\Exception\BadRequest
 	 * @return void
 	 */
-	private function getBundleContents()
-	{
+	private function getBundleContents() {
+		$bundleBinaries = null;
 		while(!$this->endDelimiterReached){
-			list($boundaryContentHeader, $boundaryContent) = $this->getPart($this->request, $this->boundary);
+			list($partHeader, $partContent) = $this->getPart($this->request, $this->boundary);
 
-			if (!isset($boundaryContentHeader['content-id'])){
-				throw new BadRequest('Request contains part without Client-ID and multistatus response cannot be constructed');
+			if (!isset($partHeader['content-id'])){
+				throw new BadRequest('Request contains part without required headers and multistatus response cannot be constructed');
 			}
-			$id = $boundaryContentHeader['content-id'];
-
-			//check if that file is expected.
-			if (!isset($this->bundleMetadata[$id])){
-				throw new BadRequest(sprintf(
-					'Request data block contains unexpected content with content-id %s. Corresponding metadata does not exists',
-					$id
-				));
-			}
-
-			//check if the expected file is corrupted
+			$binaryID = $partHeader['content-id'];
 			//TODO: description below
-			// Discuss if whole request should be aborded or not. The code below detects not only corruption of single file,
-			//but also prevents from misuse of multipart/related protocol (it might not make sense to process request if all the files are not following protocol).
-			$hash = md5($boundaryContent);
-			if (!($hash === $id)){
-				throw new BadRequest(sprintf(
-					'Expected content hash is %s. Found %s',
-					$id,
-					$hash
-				));
+			// -> Discuss if whole request should be aborded or not. The code below detects not only corruption of single file,
+			//    but also prevents from misuse of multipart/related protocol (it might not make sense to process request if all the files are not following protocol).
+			// -> Discuss if it has to be option or required field
+			if (isset($partHeader['content-md5'])){
+				//check if the expected file is corrupted
+				$hash = md5($partContent);
+				$contentMD5 = $partHeader['content-md5'];
+				if (!($hash === $contentMD5)){
+					throw new BadRequest(sprintf(
+						'Expected content hash for content-ID[%s] is %s. Found %s',
+						$binaryID,
+						$contentMD5,
+						$hash
+					));
+				}
 			}
 
-			//TODO: store file, not just place in some random folder
-			file_put_contents($this->bundleMetadata[$id]['filepath'],$boundaryContent);
-
-			//TODO: metadata
+			//perform shallow copying of binary content to an array identified by content-id
+			$bundleBinaries[$binaryID]=$partContent;
 		}
-	}
 
+		return $bundleBinaries;
+	}
 
 	/**
 	 * Send multipart response
 	 *
 	 * @return boolean
 	 */
-	private function sendResponse()
-	{
+	private function processBundle() {
 		//TODO: send multistatus response for each file
 
 		//multistatus response anounced
 		$this->response->setStatus(207);
 
 		return false;
-	}
-
-	/**
-	 * Returns a bunch of meta-data about the plugin.
-	 *
-	 * Providing this information is optional, and is mainly displayed by the
-	 * Browser plugin.
-	 *
-	 * The description key in the returned array may contain html and will not
-	 * be sanitized.
-	 *
-	 * @return array
-	 */
-	function getPluginInfo() {
-
-		return [
-			'name'        => $this->getPluginName(),
-			'description' => 'TODO:',
-			'link'        => null,
-		];
-
-	}
-
-	/**
-	 * Returns a plugin name.
-	 *
-	 * Using this name other plugins will be able to access other plugins
-	 * using DAV\Server::getPlugin
-	 *
-	 * @return string
-	 */
-	function getPluginName() {
-
-		return 'bundling';
-
 	}
 }
