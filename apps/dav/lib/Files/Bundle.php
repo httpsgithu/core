@@ -21,6 +21,7 @@
 namespace OCA\DAV\Files;
 
 use Sabre\HTTP\RequestInterface;
+use Sabre\DAV\Exception\BadRequest;
 
 class Bundle
 {
@@ -113,7 +114,7 @@ class Bundle
 
             if (!$this->content) {
                 //TODO: handle exception PROPERLY
-                throw new Forbidden('Unable to get request content');
+                throw new BadRequest('Unable to get request content');
             }
         }
 
