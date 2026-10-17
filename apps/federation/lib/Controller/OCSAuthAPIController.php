@@ -105,9 +105,15 @@ class OCSAuthAPIController extends OCSController {
 		}
 
 		// if both server initiated the exchange of the shared secret the greater
-		// token wins
+		// token wins.
+		// Compare hashes of the tokens to prevent an oracle attack: comparing
+		// raw token strings via strcmp() would leak ordering information about
+		// the stored localToken to unauthenticated callers (binary search oracle).
+		// Hashing both values with SHA-256 before comparison preserves the
+		// deterministic tie-breaking property while revealing nothing about the
+		// plaintext localToken value.
 		$localToken = $this->dbHandler->getToken($url);
-		if (\strcmp($localToken, $token) > 0) {
+		if (\strcmp(\hash('sha256', $localToken), \hash('sha256', $token)) > 0) {
 			$this->logger->info(
 				'remote server (' . $url . ') presented lower token. We will initiate the exchange of the shared secret.',
 				['app' => 'federation']
@@ -153,9 +159,8 @@ class OCSAuthAPIController extends OCSController {
 		}
 
 		if ($this->isValidToken($url, $token) === false) {
-			$expectedToken = $this->dbHandler->getToken($url);
 			$this->logger->error(
-				'remote server (' . $url . ') didn\'t send a valid token (got "' . $token . '" but expected "'. $expectedToken . '") while getting shared secret',
+				'remote server (' . $url . ') didn\'t send a valid token while getting shared secret',
 				['app' => 'federation']
 			);
 			return ['statuscode' => Http::STATUS_FORBIDDEN];

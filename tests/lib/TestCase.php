@@ -173,7 +173,7 @@ abstract class TestCase extends BaseTestCase {
 	 * @param array $parameters
 	 * @return mixed
 	 */
-	protected static function invokePrivate($object, $methodName, array $parameters = []) {
+	protected static function invokePrivate($object, $methodName, array $parameters = []): mixed {
 		if (\is_string($object)) {
 			$className = $object;
 		} else {
@@ -554,21 +554,5 @@ abstract class TestCase extends BaseTestCase {
 		$file = $folder->newFile($fileName);
 		$file->putContent($fileContent);
 		return $file;
-	}
-
-	public function assertImage(string $expectedImagePath, \OC_Image $actualImage): void {
-		# GD to Imagick conversion
-		ob_start();
-		imagepng($actualImage->resource());
-		$actualImageBlob = ob_get_clean();
-
-		# Compare images
-		$img1 = new \Imagick($expectedImagePath);
-		$img2 = new \Imagick();
-		$img2->readImageBlob($actualImageBlob);
-
-		$result = $img1->compareImages($img2, \Imagick::METRIC_MEANSQUAREERROR);
-
-		$this->assertLessThan(0.001, $result[1]);
 	}
 }
